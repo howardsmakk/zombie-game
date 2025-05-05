@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Zombie Survival</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #222;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+        }
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 20px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 48px;
+            text-align: center;
+            display: none;
+        }
+        #startScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+        }
+        #startScreen h1 {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+        #startButton {
+            padding: 15px 30px;
+            font-size: 24px;
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="ui">
+        Health: <span id="health">100</span> | 
+        Score: <span id="score">0</span> | 
+        Wave: <span id="wave">1</span>
+    </div>
+    <div id="gameOver">
+        <h1>Game Over</h1>
+        <p>Final Score: <span id="finalScore">0</span></p>
+        <button id="restartButton">Play Again</button>
+    </div>
+    <div id="startScreen">
+        <h1>Zombie Survival</h1>
+        <button id="startButton">Start Game</button>
+    </div>
+
+    <script>
+        // Game canvas and context
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // UI elements
+        const healthDisplay = document.getElementById('health');
+        const scoreDisplay = document.getElementById('score');
+        const waveDisplay = document.getElementById('wave');
+        const gameOverScreen = document.getElementById('gameOver');
+        const finalScoreDisplay = document.getElementById('finalScore');
+        const restartButton = document.getElementById('restartButton');
+        const startScreen = document.getElementById('startScreen');
+        const startButton = document.getElementById('startButton');
+        
+        // Game state
+        const game = {
+            running: false,
+            gameOver: false,
+            player: {
+                x: 0,
+                y: 0,
+                radius: 20,
+                speed: 5,
+                health: 100,
+                maxHealth: 100,
+                color: '#3498db',
+                lastShot: 0,
+                shootDelay: 300
+            },
+            zombies: [],
+            bullets: [],
+            score: 0,
+            wave: 1,
+            zombieCount: 5,
+            lastZombieSpawn: 0,
+            zombieSpawnDelay: 2000,
+            keys: {
+                w: false,
+                a: false,
+                s: false,
+                d: false
+            },
+            mouse: {
+                x: 0,
+                y: 0,
+                clicked: false
+            }
+        };
+        
+        // Resize canvas to window size
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            game.player.x = canvas.width / 2;
+            game.player.y = canvas.height / 2;
+        }
+        
+        // Initialize game
+        function initGame() {
+            resizeCanvas();
+            game.running = true;
+            game.gameOver = false;
+            game.player.health = game.player.maxHealth;
+            game.score = 0;
+            game.wave = 1;
+            game.zombieCount = 5;
+            game.zombies = [];
+            game.bullets = [];
+            
+            updateUI();
+            startScreen.style.display = 'none';
+            gameOverScreen.style.display = 'none';
+            
+            // Start game loop
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Main game loop
+        function gameLoop() {
+            if (!game.running) return;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Update game state
+            updateGame();
+            
+            // Draw game
+            drawGame();
+            
+            // Continue loop
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Update game state
+        function updateGame() {
+            // Move player
+            movePlayer();
+            
+            // Spawn zombies
+            spawnZombies();
+            
+            // Move zombies
+            moveZombies();
+            
+            // Move bullets
+            moveBullets();
+            
+            // Check collisions
+            checkCollisions();
+            
+            // Check wave progression
+            checkWave();
+        }
+        
+        // Move player based on keyboard input
+        function movePlayer() {
+            let moveX = 0;
+            let moveY = 0;
+            
+            if (game.keys.w) moveY -= game.player.speed;
+            if (game.keys.a) moveX -= game.player.speed;
+            if (game.keys.s) moveY += game.player.speed;
+            if (game.keys.d) moveX += game.player.speed;
+            
+            // Normalize diagonal movement
+            if (moveX !== 0 && moveY !== 0) {
+                moveX *= 0.7071; // 1/sqrt(2)
+                moveY *= 0.7071;
+            }
+            
+            // Update position with boundary checks
+            game.player.x = Math.max(game.player.radius, 
+                Math.min(canvas.width - game.player.radius, game.player.x + moveX));
+            game.player.y = Math.max(game.player.radius, 
+                Math.min(canvas.height - game.player.radius, game.player.y + moveY));
+            
+            // Handle shooting
+            if (game.mouse.clicked) {
+                const now = Date.now();
+                if (now - game.player.lastShot > game.player.shootDelay) {
+                    shoot();
+                    game.player.lastShot = now;
+                }
+            }
+        }
+        
+        // Shoot a bullet
+        function shoot() {
+            // Calculate direction to mouse
+            const dx = game.mouse.x - game.player.x;
+            const dy = game.mouse.y - game.player.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance > 0) {
+                game.bullets.push({
+                    x: game.player.x,
+                    y: game.player.y,
+                    dx: (dx / distance) * 10,
+                    dy: (dy / distance) * 10,
+                    radius: 5,
+                    color: '#f1c40f'
+                });
+            }
+        }
+        
+        // Spawn zombies
+        function spawnZombies() {
+            const now = Date.now();
+            if (now - game.lastZombieSpawn > game.zombieSpawnDelay && 
+                game.zombies.length < game.zombieCount) {
+                
+                // Spawn from edges of screen
+                let x, y;
+                if (Math.random() < 0.5) {
+                    x = Math.random() < 0.5 ? -20 : canvas.width + 20;
+                    y = Math.random() * canvas.height;
+                } else {
+                    x = Math.random() * canvas.width;
+                    y = Math.random() < 0.5 ? -20 : canvas.height + 20;
+                }
+                
+                game.zombies.push({
+                    x: x,
+                    y: y,
+                    radius: 15,
+                    speed: 1 + Math.random(),
+                    health: 30,
+                    color: '#e74c3c',
+                    damage: 10,
+                    lastHit: 0
+                });
+                
+                game.lastZombieSpawn = now;
+            }
+        }
+        
+        // Move zombies toward player
+        function moveZombies() {
+            for (let i = 0; i < game.zombies.length; i++) {
+                const zombie = game.zombies[i];
+                
+                // Calculate direction to player
+                const dx = game.player.x - zombie.x;
+                const dy = game.player.y - zombie.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance > 0) {
+                    // Move toward player
+                    zombie.x += (dx / distance) * zombie.speed;
+                    zombie.y += (dy / distance) * zombie.speed;
+                }
+            }
+        }
+        
+        // Move bullets
+        function moveBullets() {
+            for (let i = game.bullets.length - 1; i >= 0; i--) {
+                const bullet = game.bullets[i];
+                
+                bullet.x += bullet.dx;
+                bullet.y += bullet.dy;
+                
+                // Remove if out of bounds
+                if (bullet.x < 0 || bullet.x > canvas.width || 
+                    bullet.y < 0 || bullet.y > canvas.height) {
+                    game.bullets.splice(i, 1);
+                }
+            }
+        }
+        
+        // Check collisions
+        function checkCollisions() {
+            // Bullets hitting zombies
+            for (let i = game.bullets.length - 1; i >= 0; i--) {
+                const bullet = game.bullets[i];
+                
+                for (let j = game.zombies.length - 1; j >= 0; j--) {
+                    const zombie = game.zombies[j];
+                    
+                    const dx = bullet.x - zombie.x;
+                    const dy = bullet.y - zombie.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (distance < bullet.radius + zombie.radius) {
+                        // Hit zombie
+                        zombie.health -= 10;
+                        
+                        // Remove bullet
+                        game.bullets.splice(i, 1);
+                        
+                        // Check if zombie died
+                        if (zombie.health <= 0) {
+                            game.zombies.splice(j, 1);
+                            game.score += 10;
+                            updateUI();
+                        }
+                        
+                        break;
+                    }
+                }
+            }
+            
+            // Zombies hitting player
+            for (let i = 0; i < game.zombies.length; i++) {
+                const zombie = game.zombies[i];
+                
+                const dx = zombie.x - game.player.x;
+                const dy = zombie.y - game.player.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < zombie.radius + game.player.radius) {
+                    const now = Date.now();
+                    if (now - zombie.lastHit > 1000) {
+                        game.player.health -= zombie.damage;
+                        zombie.lastHit = now;
+                        updateUI();
+                        
+                        if (game.player.health <= 0) {
+                            gameOver();
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Check wave progression
+        function checkWave() {
+            if (game.zombies.length === 0 && game.zombieCount <= game.score / 10) {
+                nextWave();
+            }
+        }
+        
+        // Advance to next wave
+        function nextWave() {
+            game.wave++;
+            game.zombieCount = 5 + Math.floor(game.wave * 1.5);
+            game.zombieSpawnDelay = Math.max(500, 2000 - game.wave * 100);
+            updateUI();
+        }
+        
+        // Draw game elements
+        function drawGame() {
+            // Draw player
+            ctx.fillStyle = game.player.color;
+            ctx.beginPath();
+            ctx.arc(game.player.x, game.player.y, game.player.radius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Draw direction indicator
+            const dx = game.mouse.x - game.player.x;
+            const dy = game.mouse.y - game.player.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance > 0) {
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(game.player.x, game.player.y);
+                ctx.lineTo(
+                    game.player.x + (dx / distance) * game.player.radius * 1.5,
+                    game.player.y + (dy / distance) * game.player.radius * 1.5
+                );
+                ctx.stroke();
+            }
+            
+            // Draw zombies
+            for (const zombie of game.zombies) {
+                ctx.fillStyle = zombie.color;
+                ctx.beginPath();
+                ctx.arc(zombie.x, zombie.y, zombie.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Health bar
+                const healthPercent = zombie.health / 30;
+                ctx.fillStyle = 'black';
+                ctx.fillRect(zombie.x - zombie.radius, zombie.y - zombie.radius - 10, 
+                              zombie.radius * 2, 5);
+                ctx.fillStyle = healthPercent > 0.6 ? 'green' : healthPercent > 0.3 ? 'yellow' : 'red';
+                ctx.fillRect(zombie.x - zombie.radius, zombie.y - zombie.radius - 10, 
+                              zombie.radius * 2 * healthPercent, 5);
+            }
+            
+            // Draw bullets
+            for (const bullet of game.bullets) {
+                ctx.fillStyle = bullet.color;
+                ctx.beginPath();
+                ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        
+        // Update UI displays
+        function updateUI() {
+            healthDisplay.textContent = game.player.health;
+            scoreDisplay.textContent = game.score;
+            waveDisplay.textContent = game.wave;
+        }
+        
+        // Game over
+        function gameOver() {
+            game.running = false;
+            game.gameOver = true;
+            finalScoreDisplay.textContent = game.score;
+            gameOverScreen.style.display = 'block';
+        }
+        
+        // Event listeners
+        function setupEventListeners() {
+            // Window resize
+            window.addEventListener('resize', resizeCanvas);
+            
+            // Keyboard controls
+            window.addEventListener('keydown', (e) => {
+                switch (e.key.toLowerCase()) {
+                    case 'w': game.keys.w = true; break;
+                    case 'a': game.keys.a = true; break;
+                    case 's': game.keys.s = true; break;
+                    case 'd': game.keys.d = true; break;
+                }
+            });
+            
+            window.addEventListener('keyup', (e) => {
+                switch (e.key.toLowerCase()) {
+                    case 'w': game.keys.w = false; break;
+                    case 'a': game.keys.a = false; break;
+                    case 's': game.keys.s = false; break;
+                    case 'd': game.keys.d = false; break;
+                }
+            });
+            
+            // Mouse controls
+            canvas.addEventListener('mousemove', (e) => {
+                game.mouse.x = e.clientX;
+                game.mouse.y = e.clientY;
+            });
+            
+            canvas.addEventListener('mousedown', () => {
+                game.mouse.clicked = true;
+            });
+            
+            canvas.addEventListener('mouseup', () => {
+                game.mouse.clicked = false;
+            });
+            
+            // Touch controls for mobile
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                game.mouse.x = e.touches[0].clientX;
+                game.mouse.y = e.touches[0].clientY;
+                game.mouse.clicked = true;
+            });
+            
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                game.mouse.x = e.touches[0].clientX;
+                game.mouse.y = e.touches[0].clientY;
+            });
+            
+            canvas.addEventListener('touchend', () => {
+                game.mouse.clicked = false;
+            });
+            
+            // Start and restart buttons
+            startButton.addEventListener('click', initGame);
+            restartButton.addEventListener('click', initGame);
+        }
+        
+        // Initialize the game
+        setupEventListeners();
+        resizeCanvas();
+    </script>
+</body>
+</html>
